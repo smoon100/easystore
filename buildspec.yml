@@ -1,0 +1,56 @@
+version: 0.2
+
+env:
+  # Define these variables within your buildspec.yml
+  # IMPORTANT: Replace the placeholder values with your actual AWS Region and Account ID
+  variables:
+    AWS_DEFAULT_REGION: "us-east-1"      # e.g., us-east-1, eu-west-1
+    AWS_ACCOUNT_ID: "122610488257"       # Your 12-digit AWS Account ID
+    IMAGE_REPO_NAME: "eazystore"
+    DOCKER_CONTAINER_NAME: "eazystore-container"
+
+phases:
+  install:
+    runtime-versions:
+      # Ensure the build environment has a compatible Java version if needed for any pre-build steps
+      java: corretto21
+  pre_build:
+    commands:
+      - echo Logging in to Amazon ECR...
+      # The AWS_ACCOUNT_ID and AWS_DEFAULT_REGION are environment variables.
+      # It's recommended to set these in your CodeBuild project configuration.
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
+      # - aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 122610488257.dkr.ecr.us-east-1.amazonaws.com
+      # Define image repository and tag variables for clarity
+      # 122610488257.dkr.ecr.us-east-1.amazonaws.com/eazystore
+      - REPOSITORY_URI=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME
+#      - COMMIT_HASH=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c 1-7)
+#      - IMAGE_TAG=${COMMIT_HASH:=latest}
+      - IMAGE_TAG=build-$(echo $CODEBUILD_BUILD_ID | awk -F":" '{print $2}')
+  build:
+    commands:
+      - echo Build started on `date`
+      - echo running mvn clean install...
+      - mvn clean install
+      - echo Building the Docker image...
+
+      # Build the Docker image using the Dockerfile in the current directory
+      - docker build -t $REPOSITORY_URI:latest .
+      # Tag the image with the specific commit hash for versioning
+      - docker tag $REPOSITORY_URI:latest $REPOSITORY_URI:$IMAGE_TAG
+  post_build:
+    commands:
+      - echo Build completed on `date`
+      - echo Pushing the Docker images to ECR...
+      - docker push $REPOSITORY_URI:latest
+      - docker push $REPOSITORY_URI:$IMAGE_TAG
+      - echo Writing image definitions file...
+      # This artifact is used by AWS CodePipeline to deploy the new image to services like ECS or EKS
+      - printf '[{"name":"%s","imageUri":"%s"}]' $DOCKER_CONTAINER_NAME $REPOSITORY_URI:$IMAGE_TAG > imagedefinitions.json
+      - echo $DOCKER_CONTAINER_NAME
+      - echo printing imagedefinitions.json
+      - cat imagedefinitions.json
+# Define the artifacts to be passed to the next stage of a pipeline (e.g., deployment)
+artifacts:
+  files:
+    - imagedefinitions.json
