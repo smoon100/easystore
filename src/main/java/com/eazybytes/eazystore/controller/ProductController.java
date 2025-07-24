@@ -25,4 +25,10 @@ public class ProductController {
         return productList;
     }
 
+    @GetMapping("/test")
+    public String test() {
+        return "test";
+    }
+
+
 }
